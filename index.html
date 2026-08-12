@@ -682,8 +682,8 @@ const QuizCard = ({ topicId, onEmailEscalate }) => {
 // CHAT PANEL (persistent right side)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const ChatPanel = ({ onEmailEscalate }) => {
-  const [messages, setMessages] = useState([{ id: 1, role: "ai", type: "text", text: "Hi Alex! 👋 I'm your **StudySync AI** copilot.\n\n• **Explain concepts** — highlight text in Lecture Notes\n• **Practice quizzes** — test your weak topics\n• **Email professors** — one-click escalation\n\nAsk me anything!" }]);
+const ChatPanel = ({ onEmailEscalate, onNavigateToNotes, onNavigateToQuiz, onHighlightTasks, onShowWeakTopics }) => {
+  const [messages, setMessages] = useState([{ id: 1, role: "ai", type: "text", text: "Hi Alex! 👋 I'm your **StudySync AI** copilot.\n\n• **Explain concepts** — highlight text in Lecture Notes\n• **Practice quizzes** — \"quiz me on state machines\"\n• **View weak topics** — \"show my weak topics\"\n• **Manage tasks** — \"help me with overdue tasks\"\n• **Email professors** — \"email my professor\"\n\nI understand natural language — just ask!" }]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const endRef = useRef(null);
@@ -692,15 +692,184 @@ const ChatPanel = ({ onEmailEscalate }) => {
   const typing = (cb, d=900) => { setIsTyping(true); setTimeout(() => { setIsTyping(false); cb(); }, d); };
   const handleExplain = useCallback((text, topic) => { add({ role: "user", type: "text", text: `Explain: "${text.substring(0,50)}..."` }); typing(() => { add({ role: "ai", type: "text", text: AI_RESPONSES.explain(topic, text) }); add({ role: "ai", type: "escalate-prompt", topic, course: "CG1111A" }); }, 1000); }, []);
   const handleQuizRequest = useCallback((topicId, topicName) => { add({ role: "user", type: "text", text: `Quiz me on: ${topicName}` }); typing(() => { add({ role: "ai", type: "text", text: AI_RESPONSES.quiz_intro(topicName) }); add({ role: "ai", type: "quiz", topicId }); }, 800); }, []);
+
+  // ─── NLP INTENT PARSER ────────────────────────────────────────────────────
+  const parseIntent = (text) => {
+    const lower = text.toLowerCase();
+
+    // Intent: Overdue/pending tasks
+    if (lower.match(/overdue|pending|deadline|due.*task|my.*task|help.*task|behind.*schedule|late.*assignment/)) {
+      return { intent: "tasks", confidence: 0.9 };
+    }
+    // Intent: Weak topics / struggling areas
+    if (lower.match(/weak.*topic|struggling|trouble.*with|difficult|hard.*time|my.*weakness|where.*i.*weak|show.*weak|areas.*improve/)) {
+      return { intent: "weak-topics", confidence: 0.9 };
+    }
+    // Intent: Take a quiz on a specific topic
+    if (lower.match(/quiz|test.*me|practice|assess/)) {
+      // Try to match a specific topic
+      if (lower.match(/state.*machine|fsm|finite.*state/)) return { intent: "quiz-specific", topic: "state-machines", topicName: "State Machines", confidence: 0.95 };
+      if (lower.match(/vector|dot.*product|cross.*product/)) return { intent: "quiz-specific", topic: "vector-math", topicName: "Vector Math & Dot Products", confidence: 0.95 };
+      if (lower.match(/process.*sync|concurren|semaphore|deadlock|race.*condition|synchroni/)) return { intent: "quiz-specific", topic: "process-sync", topicName: "Process Synchronisation", confidence: 0.95 };
+      return { intent: "quiz-picker", confidence: 0.85 };
+    }
+    // Intent: Email professor
+    if (lower.match(/email.*prof|mail.*prof|contact.*prof|reach.*prof|write.*prof|email.*instructor|message.*prof|ask.*prof/)) {
+      // Identify which professor
+      if (lower.match(/smith|cg1111|engineering.*principle/)) return { intent: "email", professor: "Prof. Smith", topic: "State Machines", course: "CG1111A", confidence: 0.9 };
+      if (lower.match(/lee|cs2106|operating.*system/)) return { intent: "email", professor: "Dr. Lee Wei Lin", topic: "Process Synchronisation", course: "CS2106", confidence: 0.9 };
+      if (lower.match(/tan|ma1508|linear.*algebra/)) return { intent: "email", professor: "Prof. Tan Ah Kow", topic: "Vector Math", course: "MA1508E", confidence: 0.9 };
+      return { intent: "email", professor: null, topic: "State Machines", course: "CG1111A", confidence: 0.7 };
+    }
+    // Intent: View lecture notes
+    if (lower.match(/notes|lecture|review.*chapter|read.*chapter|study.*material|revision/)) {
+      if (lower.match(/state.*machine|fsm|ch.*3.*cg|cg.*ch.*3/)) return { intent: "notes", course: "CG1111A", chapter: "ch3", label: "State Machines (CG1111A Ch3)", confidence: 0.9 };
+      if (lower.match(/synchroni|concurren|ch.*7|deadlock/)) return { intent: "notes", course: "CS2106", chapter: "ch7", label: "Process Synchronisation (CS2106 Ch7)", confidence: 0.9 };
+      if (lower.match(/vector|dot.*product|ch.*5/)) return { intent: "notes", course: "MA1508E", chapter: "ch5", label: "Vector Math (MA1508E Ch5)", confidence: 0.9 };
+      if (lower.match(/boolean|logic.*gate|ch.*1/)) return { intent: "notes", course: "CG1111A", chapter: "ch1", label: "Boolean Algebra (CG1111A Ch1)", confidence: 0.9 };
+      return { intent: "notes-general", confidence: 0.6 };
+    }
+    // Intent: Explain something
+    if (lower.match(/explain|what.*is|define|tell.*me.*about|how.*does.*work/)) {
+      if (lower.match(/state.*machine|fsm/)) return { intent: "explain", topic: "State Machines", content: "A Finite State Machine (FSM) is a computational model consisting of a finite number of states, transitions between those states, and actions. An FSM can only be in one state at a time. It transitions upon input events.", confidence: 0.9 };
+      if (lower.match(/semaphore/)) return { intent: "explain", topic: "Semaphores", content: "A semaphore is a synchronisation tool that uses an integer variable accessed through two atomic operations: wait (P) and signal (V). Binary semaphores can take values 0 or 1, while counting semaphores can have any non-negative value.", confidence: 0.9 };
+      if (lower.match(/deadlock/)) return { intent: "explain", topic: "Deadlock", content: "Deadlock occurs when a set of processes are each waiting for a resource held by another process in the set. The four necessary conditions are: mutual exclusion, hold-and-wait, no preemption, and circular wait.", confidence: 0.9 };
+      if (lower.match(/dot.*product|inner.*product/)) return { intent: "explain", topic: "Dot Product", content: "The dot product (inner product) of two vectors a and b is defined as a·b = Σ(a_i × b_i). Geometrically, a·b = |a||b|cos(θ). Two vectors are orthogonal iff their dot product is zero.", confidence: 0.9 };
+      if (lower.match(/moore|mealy/)) return { intent: "explain", topic: "Moore vs Mealy Machines", content: "In a Moore machine, outputs depend only on the current state. In a Mealy machine, outputs depend on both the current state and the current input. Mealy machines typically require fewer states than equivalent Moore machines.", confidence: 0.9 };
+      return { intent: "explain-general", confidence: 0.5 };
+    }
+    // Intent: Timetable / schedule
+    if (lower.match(/timetable|schedule|class.*today|what.*class|next.*class/)) {
+      return { intent: "timetable", confidence: 0.85 };
+    }
+    // Intent: GPA / performance summary
+    if (lower.match(/gpa|performance|how.*am.*i.*doing|my.*grade|my.*score|overall.*result/)) {
+      return { intent: "performance", confidence: 0.85 };
+    }
+
+    return { intent: "unknown", confidence: 0 };
+  };
+
   const handleSend = () => {
     const t = input.trim(); if (!t) return;
     add({ role: "user", type: "text", text: t }); setInput("");
-    const lower = t.toLowerCase();
+    const parsed = parseIntent(t);
+
     typing(() => {
-      if (lower.includes("quiz") || lower.includes("practice")) { add({ role: "ai", type: "text", text: "Which topic? Pick one:" }); add({ role: "ai", type: "quiz-picker" }); }
-      else if (lower.includes("explain") || lower.includes("what is")) { add({ role: "ai", type: "text", text: "Highlight text in **Lecture Notes** and click **Explain This**, or go to a module's notes page!" }); }
-      else if (lower.includes("email") || lower.includes("prof")) { add({ role: "ai", type: "escalate-prompt", topic: "State Machines", course: "CG1111A" }); }
-      else { add({ role: "ai", type: "text", text: `I can help with that! Try:\n• Highlighting lecture notes → "Explain This"\n• Opening a module → Past Tests to see weak chapters\n• Asking me: *"Quiz me on State Machines"*` }); }
+      switch (parsed.intent) {
+        case "tasks": {
+          const overdue = TASKS.filter(tk => tk.status === "overdue");
+          const dueSoon = TASKS.filter(tk => tk.status === "due-soon");
+          let response = `📋 **Here's your task status:**\n\n`;
+          if (overdue.length > 0) response += `**🔴 Overdue (${overdue.length}):**\n${overdue.map(tk => `• ${tk.title} — ${tk.course} (was due ${tk.due})`).join("\n")}\n\n`;
+          if (dueSoon.length > 0) response += `**🟡 Due Soon (${dueSoon.length}):**\n${dueSoon.map(tk => `• ${tk.title} — ${tk.course} (due ${tk.due})`).join("\n")}\n\n`;
+          response += `💡 *I recommend tackling the overdue items first. Would you like me to open the relevant module notes or email your professor for an extension?*`;
+          add({ role: "ai", type: "text", text: response });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: "📖 View CG1111A Notes", action: "notes", course: "CG1111A", chapter: "ch1" },
+            { label: "✉️ Email Prof for Extension", action: "email", topic: "Lab Report Extension", course: "CG1111A" },
+            { label: "📋 View All Tasks", action: "highlight-tasks" },
+          ]});
+          if (onHighlightTasks) onHighlightTasks();
+          break;
+        }
+        case "weak-topics": {
+          let response = `🎯 **Your AI-Identified Weak Topics:**\n\n`;
+          WEAK_TOPICS.forEach(wt => {
+            const trend = wt.trend === "up" ? "📈 Improving" : wt.trend === "down" ? "📉 Declining" : "➡️ Stable";
+            response += `• **${wt.topic}** (${wt.course}) — ${wt.score}% · ${trend}\n`;
+          });
+          response += `\n💡 *State Machines is your weakest area at 42%. I'd recommend starting there. Want to take a quiz or review the notes?*`;
+          add({ role: "ai", type: "text", text: response });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: "📝 Quiz: State Machines", action: "quiz", topicId: "state-machines", topicName: "State Machines" },
+            { label: "📖 Notes: State Machines", action: "notes", course: "CG1111A", chapter: "ch3" },
+            { label: "📝 Quiz: Process Sync", action: "quiz", topicId: "process-sync", topicName: "Process Synchronisation" },
+            { label: "📖 Notes: Vector Math", action: "notes", course: "MA1508E", chapter: "ch5" },
+          ]});
+          if (onShowWeakTopics) onShowWeakTopics();
+          break;
+        }
+        case "quiz-specific": {
+          handleQuizRequest(parsed.topic, parsed.topicName);
+          break;
+        }
+        case "quiz-picker": {
+          add({ role: "ai", type: "text", text: "Great idea! 💪 Here are your weak topics — pick one to quiz on:" });
+          add({ role: "ai", type: "quiz-picker" });
+          break;
+        }
+        case "email": {
+          const prof = parsed.professor || "Prof. Smith";
+          add({ role: "ai", type: "text", text: `✉️ I'll help you draft an email to **${prof}** about **${parsed.topic}** (${parsed.course}).\n\nI've pre-filled the email with context from your recent performance. Review and send when ready!` });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: `✉️ Open Email Draft to ${prof}`, action: "email", topic: parsed.topic, course: parsed.course, professor: prof },
+            { label: "📋 See Faculty Directory", action: "navigate", target: "support" },
+          ]});
+          break;
+        }
+        case "notes": {
+          add({ role: "ai", type: "text", text: `📖 Opening **${parsed.label}** lecture notes for you!\n\nI'll navigate you directly to the chapter. You can highlight any text there and click "Explain This" for AI explanations.` });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: `📖 Go to ${parsed.label}`, action: "notes", course: parsed.course, chapter: parsed.chapter },
+            { label: "📝 Take Quiz on This Topic", action: "quiz", topicId: parsed.course === "CG1111A" && parsed.chapter === "ch3" ? "state-machines" : parsed.course === "CS2106" ? "process-sync" : "vector-math", topicName: parsed.label.split("(")[0].trim() },
+          ]});
+          if (onNavigateToNotes) onNavigateToNotes(parsed.course, parsed.chapter);
+          break;
+        }
+        case "notes-general": {
+          add({ role: "ai", type: "text", text: "📖 Which module's notes would you like to review? Here are your modules:" });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: "📖 CG1111A: State Machines (Ch3)", action: "notes", course: "CG1111A", chapter: "ch3" },
+            { label: "📖 CS2106: Process Sync (Ch7)", action: "notes", course: "CS2106", chapter: "ch7" },
+            { label: "📖 MA1508E: Vector Math (Ch5)", action: "notes", course: "MA1508E", chapter: "ch5" },
+          ]});
+          break;
+        }
+        case "explain": {
+          add({ role: "ai", type: "text", text: AI_RESPONSES.explain(parsed.topic, parsed.content) });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: "📝 Quiz Me on This", action: "quiz", topicId: parsed.topic.includes("State") || parsed.topic.includes("Moore") ? "state-machines" : parsed.topic.includes("Dot") ? "vector-math" : "process-sync", topicName: parsed.topic },
+            { label: "✉️ Ask Prof for More Help", action: "email", topic: parsed.topic, course: parsed.topic.includes("State") || parsed.topic.includes("Moore") ? "CG1111A" : parsed.topic.includes("Dot") ? "MA1508E" : "CS2106" },
+          ]});
+          break;
+        }
+        case "explain-general": {
+          add({ role: "ai", type: "text", text: "I'd love to explain! You can:\n\n• **Highlight text** in Lecture Notes → click \"Explain This\"\n• Ask me directly: *\"explain deadlock\"*, *\"what is a semaphore\"*, *\"explain dot product\"*\n\nWhat topic would you like me to explain?" });
+          break;
+        }
+        case "timetable": {
+          const today = TIMETABLE.filter(s => s.subject !== "Lunch Break");
+          let response = `🗓️ **Today's Schedule:**\n\n`;
+          today.forEach(s => { response += `• **${s.time}** — ${s.subject} (${s.type}, ${s.room})\n`; });
+          response += `\n💡 *Click below to view the full weekly timetable.*`;
+          add({ role: "ai", type: "text", text: response });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: "🗓️ View Full Weekly Timetable", action: "timetable" },
+          ]});
+          break;
+        }
+        case "performance": {
+          const modScores = Object.entries(MODULES).map(([code, mod]) => {
+            const test = mod.pastTests[0];
+            return { code, score: test ? Math.round(test.totalScore / test.maxScore * 100) : null };
+          });
+          const avg = Math.round(modScores.filter(m => m.score).reduce((s, m) => s + m.score, 0) / modScores.filter(m => m.score).length);
+          let response = `📊 **Your Academic Performance Summary:**\n\n• **Overall Average:** ${avg}%\n• **GPA:** ${STUDENT.gpa}\n\n**Module Breakdown:**\n`;
+          modScores.forEach(m => { response += `• ${m.code}: ${m.score !== null ? m.score + "%" : "No tests yet"}\n`; });
+          response += `\n${WEAK_TOPICS.length} weak topics identified. Your strongest areas are Boolean algebra and quantitative reasoning.`;
+          add({ role: "ai", type: "text", text: response });
+          add({ role: "ai", type: "action-buttons", buttons: [
+            { label: "🎯 View Weak Topics", action: "show-weak" },
+            { label: "📚 View All Modules", action: "navigate", target: "modules" },
+          ]});
+          break;
+        }
+        default: {
+          add({ role: "ai", type: "text", text: `I understand you're asking about that! Here's what I can help with:\n\n• **"help me with my overdue tasks"** — view & manage deadlines\n• **"show my weak topics"** — see AI-identified weaknesses\n• **"quiz me on state machines"** — take a practice quiz\n• **"review state machine notes"** — open lecture notes\n• **"email my professor"** — draft an email\n• **"explain deadlock"** — get concept explanations\n• **"what's my schedule"** — view timetable\n• **"how am I doing"** — performance summary\n\nTry one of these, or ask me something specific!` });
+          break;
+        }
+      }
     });
   };
   window._studysyncExplain = handleExplain;
@@ -711,7 +880,7 @@ const ChatPanel = ({ onEmailEscalate }) => {
     <div className="flex flex-col h-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-violet-50 to-indigo-50 flex-shrink-0">
         <div className="relative"><div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold">AI</div><span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white pulse-dot" /></div>
-        <div><p className="text-sm font-semibold text-slate-900">StudySync AI</p><p className="text-xs text-slate-400">Always online</p></div>
+        <div><p className="text-sm font-semibold text-slate-900">StudySync AI</p><p className="text-xs text-slate-400">NLP-Powered · Always online</p></div>
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-3">
         {messages.map(msg => (
@@ -722,6 +891,25 @@ const ChatPanel = ({ onEmailEscalate }) => {
                 {msg.type === "escalate-prompt" && (<div className="bg-amber-50 border border-amber-200 rounded-2xl rounded-tl-sm px-4 py-3"><p className="text-xs text-amber-700 font-medium mb-2">Need more help? Escalate to your professor.</p><button onClick={() => onEmailEscalate(msg.topic, msg.course)} className="w-full py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:opacity-90">✉️ Draft Email to Prof</button></div>)}
                 {msg.type === "quiz" && <QuizCard topicId={msg.topicId} onEmailEscalate={onEmailEscalate} />}
                 {msg.type === "quiz-picker" && (<div className="chat-bubble-ai rounded-2xl rounded-tl-sm px-4 py-3 border border-blue-100 space-y-2">{WEAK_TOPICS.map(t => <button key={t.id} onClick={() => handleQuizRequest(t.id, t.topic)} className="w-full text-left px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-violet-300 hover:bg-violet-50 text-xs font-medium text-slate-700 flex justify-between"><span>{t.chapterLabel}: {t.topic}</span><span className="text-red-500">{t.score}%</span></button>)}</div>)}
+                {msg.type === "action-buttons" && (
+                  <div className="chat-bubble-ai rounded-2xl rounded-tl-sm px-3 py-3 border border-indigo-100 bg-gradient-to-br from-indigo-50/50 to-violet-50/50 space-y-1.5">
+                    {msg.buttons.map((btn, idx) => (
+                      <button key={idx} onClick={() => {
+                        if (btn.action === "quiz") handleQuizRequest(btn.topicId, btn.topicName);
+                        else if (btn.action === "notes" && onNavigateToNotes) onNavigateToNotes(btn.course, btn.chapter);
+                        else if (btn.action === "email") onEmailEscalate(btn.topic || "General", btn.course || "CG1111A", btn.professor);
+                        else if (btn.action === "highlight-tasks" && onHighlightTasks) onHighlightTasks();
+                        else if (btn.action === "show-weak" && onShowWeakTopics) onShowWeakTopics();
+                        else if (btn.action === "timetable" && window._studysyncOpenTimetable) window._studysyncOpenTimetable();
+                        else if (btn.action === "navigate" && window._studysyncNavigate) window._studysyncNavigate(btn.target);
+                      }}
+                        className="w-full text-left px-3 py-2.5 rounded-xl bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-xs font-semibold text-slate-700 hover:text-indigo-700 transition-all flex items-center gap-2 shadow-sm">
+                        <span>{btn.label}</span>
+                        <svg className="w-3.5 h-3.5 ml-auto text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {msg.role === "user" && <div className="chat-bubble-user rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]"><p className="text-sm text-white">{msg.text}</p></div>}
@@ -803,6 +991,184 @@ const WeakTopicsCard = ({ onQuizRequest, onEmailEscalate, onViewNotes }) => (
     </div>
   </div>
 );
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACADEMIC TRAJECTORY & AI PERSONA SUMMARY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const AcademicTrajectoryCard = ({ onViewNotes, onQuizRequest, onEmailEscalate }) => {
+  // Aggregate performance across all modules
+  const modulePerformance = Object.entries(MODULES).map(([code, mod]) => {
+    const latestTest = mod.pastTests[0];
+    const score = latestTest ? Math.round(latestTest.totalScore / latestTest.maxScore * 100) : null;
+    const wrongQuestions = latestTest ? latestTest.questions.filter(q => !q.correct) : [];
+    const correctQuestions = latestTest ? latestTest.questions.filter(q => q.correct) : [];
+    return { code, name: mod.name, score, wrongQuestions, correctQuestions, color: mod.color };
+  });
+
+  const overallAvg = Math.round(modulePerformance.filter(m => m.score !== null).reduce((sum, m) => sum + m.score, 0) / modulePerformance.filter(m => m.score !== null).length);
+
+  // Determine qualitative strengths
+  const strengths = [];
+  const gea = modulePerformance.find(m => m.code === "GEA1000");
+  const ma = modulePerformance.find(m => m.code === "MA1508E");
+  if (gea && gea.score >= 90) strengths.push({ label: "Strong quantitative reasoning & statistical literacy", modules: ["GEA1000"], icon: "📊" });
+  if (ma && ma.score >= 60) strengths.push({ label: "Solid foundational linear algebra & matrix operations", modules: ["MA1508E"], icon: "🔢" });
+  const cg = modulePerformance.find(m => m.code === "CG1111A");
+  if (cg && cg.correctQuestions.some(q => q.chapter === "ch1" || q.chapter === "ch2")) strengths.push({ label: "Strong Boolean algebra & combinational logic design", modules: ["CG1111A"], icon: "⚡" });
+  const cs = modulePerformance.find(m => m.code === "CS2106");
+  if (cs && cs.correctQuestions.some(q => q.chapter === "ch1" || q.chapter === "ch2")) strengths.push({ label: "Good grasp of process lifecycle & scheduling algorithms", modules: ["CS2106"], icon: "🖥️" });
+
+  // Determine overarching weaknesses spanning multiple modules
+  const weaknesses = [
+    { label: "Sequential state logic & FSM design patterns", modules: ["CG1111A"], topics: ["State Machines", "Moore vs Mealy", "Next-State Tables"], icon: "🔄", severity: "high" },
+    { label: "Process concurrency & synchronisation primitives", modules: ["CS2106"], topics: ["Race Conditions", "Deadlock", "Semaphores"], icon: "🔒", severity: "high" },
+    { label: "Advanced vector operations & eigenvalue computation", modules: ["MA1508E"], topics: ["Cross Product Geometry", "Eigenvalues"], icon: "📐", severity: "medium" },
+  ];
+
+  // Strategic actionables
+  const actionables = [
+    { label: "Review State Machine Notes", description: "Revisit Ch3 FSM concepts — your weakest area at 42%", action: "notes", course: "CG1111A", chapter: "ch3", color: "violet" },
+    { label: "Launch Concurrency Practice Quiz", description: "Test process synchronisation understanding", action: "quiz", topicId: "process-sync", topicName: "Process Synchronisation", color: "blue" },
+    { label: "Practice Vector Math Quiz", description: "Strengthen dot/cross product applications", action: "quiz", topicId: "vector-math", topicName: "Vector Math & Dot Products", color: "emerald" },
+    { label: "Email Prof. Smith for FSM Help", description: "Book office hours for State Machine guidance", action: "email", topic: "State Machines", course: "CG1111A", color: "amber" },
+  ];
+
+  const colorMap = { violet: "from-violet-500 to-indigo-600", blue: "from-blue-500 to-cyan-600", emerald: "from-emerald-500 to-teal-600", orange: "from-orange-500 to-amber-600" };
+
+  return (
+    <div className="col-span-1 xl:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center text-xl">🧭</div>
+            <div>
+              <h2 className="text-base font-bold text-white">Academic Trajectory & AI Persona Summary</h2>
+              <p className="text-violet-200 text-xs mt-0.5">Cross-module performance synthesis — powered by StudySync AI</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-bold text-white">{overallAvg}%</p>
+            <p className="text-violet-200 text-xs">Overall Avg</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Module Performance Strip */}
+      <div className="px-6 py-3 border-b border-slate-100 bg-slate-50">
+        <div className="flex items-center gap-4">
+          {modulePerformance.map(mod => (
+            <div key={mod.code} className="flex items-center gap-2">
+              <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${colorMap[mod.color]} flex items-center justify-center text-white text-xs font-bold`}>{mod.code.substring(0,2)}</div>
+              <div>
+                <p className="text-xs font-semibold text-slate-700">{mod.code}</p>
+                <p className={`text-xs font-bold ${mod.score < 50 ? "text-red-500" : mod.score < 65 ? "text-yellow-600" : mod.score < 80 ? "text-blue-600" : "text-emerald-600"}`}>{mod.score !== null ? `${mod.score}%` : "—"}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left: Strengths & Weaknesses */}
+          <div className="space-y-4">
+            {/* Strengths */}
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
+                <span className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center text-xs">✓</span>
+                Overarching Strengths
+              </h3>
+              <div className="space-y-2">
+                {strengths.map((s, i) => (
+                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <span className="text-base flex-shrink-0 mt-0.5">{s.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-emerald-800">{s.label}</p>
+                      <p className="text-xs text-emerald-600 mt-0.5">Demonstrated in: {s.modules.join(", ")}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Weaknesses */}
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
+                <span className="w-6 h-6 rounded-lg bg-red-100 flex items-center justify-center text-xs">!</span>
+                Pinpointed Weaknesses
+              </h3>
+              <div className="space-y-2">
+                {weaknesses.map((w, i) => (
+                  <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${w.severity === "high" ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"}`}>
+                    <span className="text-base flex-shrink-0 mt-0.5">{w.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-semibold ${w.severity === "high" ? "text-red-800" : "text-amber-800"}`}>{w.label}</p>
+                      <p className={`text-xs mt-0.5 ${w.severity === "high" ? "text-red-600" : "text-amber-600"}`}>Affects: {w.modules.join(", ")} — Topics: {w.topics.join(", ")}</p>
+                    </div>
+                    <Badge color={w.severity === "high" ? "red" : "orange"}>{w.severity}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Recommended Actionables with CTA Buttons */}
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
+              <span className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center text-xs">🎯</span>
+              Recommended Actionables
+            </h3>
+            <div className="space-y-3">
+              {actionables.map((a, i) => {
+                const btnColors = {
+                  violet: "from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500",
+                  blue: "from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500",
+                  emerald: "from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500",
+                  amber: "from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400",
+                };
+                const handleClick = () => {
+                  if (a.action === "notes") onViewNotes(a.course, a.chapter);
+                  else if (a.action === "quiz") onQuizRequest(a.topicId, a.topicName);
+                  else if (a.action === "email") onEmailEscalate(a.topic, a.course);
+                };
+                return (
+                  <div key={i} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-all group">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-slate-800">{a.label}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{a.description}</p>
+                      </div>
+                      <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.color === "violet" ? "bg-violet-400" : a.color === "blue" ? "bg-blue-400" : a.color === "emerald" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                    </div>
+                    <button onClick={handleClick}
+                      className={`w-full py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r ${btnColors[a.color]} shadow-sm transition-all`}>
+                      {a.action === "notes" ? "📖 " : a.action === "quiz" ? "📝 " : "✉️ "}{a.label}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* AI Narrative */}
+            <div className="mt-4 bg-gradient-to-br from-slate-50 to-indigo-50 rounded-xl border border-indigo-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold">AI</div>
+                <p className="text-xs font-semibold text-indigo-700">AI Learning Trajectory Narrative</p>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Alex demonstrates <strong>strong foundational quantitative skills</strong> evident from high scores in GEA1000 (95%) and solid Boolean algebra performance in CG1111A. However, a clear pattern emerges: <strong>sequential and stateful logic</strong> — FSMs in CG1111A (42%) and process synchronisation in CS2106 (33% on related questions) — remains the primary barrier. The common thread is difficulty reasoning about <strong>temporal dependencies and state transitions</strong>. Prioritising state machine mastery will likely unlock improvements across both engineering modules.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 
 
@@ -2239,10 +2605,19 @@ const StudentDashboard = ({ onLogout }) => {
 
   const goToCCA = (ccaId) => { setSelectedCCA(ccaId); setActivePage("cca-detail"); };
 
+  // Expose navigation helpers for chatbot action buttons
+  window._studysyncOpenTimetable = () => setWeeklyModal(true);
+  window._studysyncNavigate = (target) => { setActivePage(target); setSelectedModule(null); setModuleHighlightChapter(null); setSelectedCCA(null); };
+
+  const handleChatNavigateToNotes = (course, chapter) => goToModule(course, "notes", chapter);
+  const handleChatHighlightTasks = () => {}; // Tasks are always visible on dashboard
+  const handleChatShowWeakTopics = () => {}; // Weak topics card is on dashboard
+
   const renderPage = () => {
     switch (activePage) {
       case "dashboard": return (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 max-w-5xl">
+          <AcademicTrajectoryCard onViewNotes={goToWeakTopicNotes} onQuizRequest={handleQuizInChat} onEmailEscalate={openEmail} />
           <StudentProfileCard />
           <TasksCard />
           <TimetableCard onOpenWeekly={() => setWeeklyModal(true)} />
@@ -2287,7 +2662,7 @@ const StudentDashboard = ({ onLogout }) => {
         </header>
         <div className="flex-1 flex overflow-hidden">
           <main className="flex-1 overflow-y-auto p-5 scrollbar-thin">{renderPage()}</main>
-          <div className="w-[370px] xl:w-[400px] flex-shrink-0 p-3 pl-0 hidden md:flex"><div className="flex-1 h-full"><ChatPanel onEmailEscalate={openEmail} /></div></div>
+          <div className="w-[370px] xl:w-[400px] flex-shrink-0 p-3 pl-0 hidden md:flex"><div className="flex-1 h-full"><ChatPanel onEmailEscalate={openEmail} onNavigateToNotes={handleChatNavigateToNotes} onNavigateToQuiz={handleQuizInChat} onHighlightTasks={handleChatHighlightTasks} onShowWeakTopics={handleChatShowWeakTopics} /></div></div>
         </div>
       </div>
       {emailModal && <EmailModal topic={emailModal.topic} course={emailModal.course} professor={emailModal.professor} onClose={closeEmail} />}
